@@ -126,7 +126,6 @@ async def get_watchlists() -> dict:
 
 
 @mcp.tool()
-@mcp.tool()
 async def add_movie_to_watchlist(
     watchlist_id: str,
     movie_id: str,
