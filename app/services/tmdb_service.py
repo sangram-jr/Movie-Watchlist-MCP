@@ -1,7 +1,7 @@
 
 import httpx
 
-from app.database.connection import settings
+from app.database.connection import settings,get_tmdb_api_key
 
 
 async def search_tmdb_movies(query: str, page: int = 1) -> list[dict]:
@@ -20,7 +20,7 @@ async def search_tmdb_movies(query: str, page: int = 1) -> list[dict]:
     url = f"{settings.TMDB_BASE_URL}/search/movie"
 
     headers = {
-        "Authorization": f"Bearer {settings.TMDB_API_KEY}",
+        "Authorization": f"Bearer {get_tmdb_api_key()}",
         "accept": "application/json",
     }
 
@@ -70,7 +70,7 @@ async def get_tmdb_movie_details(tmdb_id: str) -> dict:
     url = f"{settings.TMDB_BASE_URL}/movie/{tmdb_id}"
 
     headers = {
-        "Authorization": f"Bearer {settings.TMDB_API_KEY}",
+        "Authorization": f"Bearer {get_tmdb_api_key()}",
         "accept": "application/json",
     }
 

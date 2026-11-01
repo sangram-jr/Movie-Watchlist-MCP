@@ -4,17 +4,17 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     AsyncSession,
 )
-
 from sqlalchemy import text
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Load environment variables
 class Settings(BaseSettings):
-    DATABASE_URL: str
-    DEV_USER_EMAIL: str = "developer@example.com"
+    # These values are supplied at runtime.
+    # They are optional during FastMCP's build-time inspection.
+    DATABASE_URL: str | None = None
+    TMDB_API_KEY: str | None = None
 
-    TMDB_API_KEY: str
+    DEV_USER_EMAIL: str = "developer@example.com"
     TMDB_BASE_URL: str = "https://api.themoviedb.org/3"
     TMDB_IMAGE_BASE_URL: str = "https://image.tmdb.org/t/p/w500"
 
@@ -28,28 +28,70 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-# Create asynchronous database engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=True,
-    pool_pre_ping=True,
-)
+# Create the engine only when the application needs the database.
+_engine = None
+_session_factory = None
 
 
-# Create async session factory
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+def get_engine():
+    global _engine
+
+    if _engine is None:
+        if not settings.DATABASE_URL:
+            raise RuntimeError(
+                "DATABASE_URL is missing. Configure it in the "
+                "deployment environment variables."
+            )
+
+        _engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=False,
+            pool_pre_ping=True,
+        )
+
+    return _engine
 
 
-# Test database connection
+def get_session_factory():
+    global _session_factory
+
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(
+            bind=get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+    return _session_factory
+
+
+# Keeps existing usage compatible:
+# async with AsyncSessionLocal() as session:
+class LazySessionLocal:
+
+    def __call__(self):
+        return get_session_factory()()
+
+
+AsyncSessionLocal = LazySessionLocal()
+
+
+def get_tmdb_api_key() -> str:
+    if not settings.TMDB_API_KEY:
+        raise RuntimeError(
+            "TMDB_API_KEY is missing. Configure it in the "
+            "deployment environment variables."
+        )
+
+    return settings.TMDB_API_KEY
+
+
 async def test_db_connection():
 
     try:
-        async with engine.connect() as connection:
+        engine = get_engine()
 
+        async with engine.connect() as connection:
             result = await connection.execute(
                 text("SELECT version()")
             )
@@ -62,6 +104,3 @@ async def test_db_connection():
     except Exception as e:
         print("Database connection failed:", str(e))
         raise
-
-    finally:
-        await engine.dispose()
