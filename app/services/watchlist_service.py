@@ -1,23 +1,25 @@
-import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Movie,Watchlist,WatchlistMovie
-from app.services.dev_identity import get_or_create_dev_user
+
+import uuid
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models import Movie, Watchlist, WatchlistMovie
+from app.services.user_service import get_or_create_user
 
-# create watchlist for particular user
+
+# 1. Create a watchlist
 async def create_watchlist(
     session: AsyncSession,
+    supabase_user_id: str,
     name: str,
     description: str | None = None,
+    email: str | None = None,
 ) -> Watchlist:
-    """
-    Create a watchlist for the current development user.
-    """
+    """Create a watchlist for the authenticated Supabase user."""
 
-    # Validate watchlist name
     name = name.strip()
 
     if not name:
@@ -29,10 +31,12 @@ async def create_watchlist(
     if description is not None:
         description = description.strip() or None
 
-    # Get the development user
-    user = await get_or_create_dev_user(session)
+    user = await get_or_create_user(
+        session=session,
+        supabase_user_id=supabase_user_id,
+        email=email,
+    )
 
-    # Create watchlist
     watchlist = Watchlist(
         user_id=user.id,
         name=name,
@@ -40,65 +44,56 @@ async def create_watchlist(
     )
 
     session.add(watchlist)
-
     await session.flush()
 
     return watchlist
 
 
-
-# get all the watchlist based on userid
+# 2. Get all watchlists for the authenticated user
 async def get_watchlists(
     session: AsyncSession,
+    supabase_user_id: str,
+    email: str | None = None,
 ) -> list[Watchlist]:
-    """
-    Retrieve all watchlists belonging to the current development user.
-    """
+    """Retrieve only the authenticated user's watchlists."""
 
-    # Get current development user
-    user = await get_or_create_dev_user(session)
+    user = await get_or_create_user(
+        session=session,
+        supabase_user_id=supabase_user_id,
+        email=email,
+    )
 
-    # Fetch only this user's watchlists
     result = await session.execute(
         select(Watchlist)
         .where(Watchlist.user_id == user.id)
         .order_by(Watchlist.created_at.desc())
     )
 
-    watchlists = result.scalars().all()
-
-    return list(watchlists)
+    return list(result.scalars().all())
 
 
-
-
-
-
-
-
-# add movie to the particular watchlist
-
+# 3. Add a movie to a watchlist
 async def add_movie_to_watchlist(
     session: AsyncSession,
+    supabase_user_id: str,
     watchlist_id: uuid.UUID,
     movie_id: str,
+    email: str | None = None,
 ) -> WatchlistMovie:
-    """
-    Add an existing movie from the movies catalog
-    to a user's watchlist.
-
-    movie_id represents the TMDB movie ID.
-    """
+    """Add an existing movie to the authenticated user's watchlist."""
 
     movie_id = str(movie_id).strip()
 
     if not movie_id or len(movie_id) > 100:
         raise ValueError("Invalid movie ID.")
 
-    # 1. Get the current development user
-    user = await get_or_create_dev_user(session)
+    user = await get_or_create_user(
+        session=session,
+        supabase_user_id=supabase_user_id,
+        email=email,
+    )
 
-    # 2. Verify that the watchlist belongs to this user
+    # Verify ownership
     result = await session.execute(
         select(Watchlist).where(
             Watchlist.id == watchlist_id,
@@ -111,7 +106,7 @@ async def add_movie_to_watchlist(
     if not watchlist:
         raise ValueError("Watchlist not found.")
 
-    # 3. Verify that the movie exists in our movie catalog
+    # Verify movie exists
     result = await session.execute(
         select(Movie).where(Movie.tmdb_id == movie_id)
     )
@@ -124,7 +119,7 @@ async def add_movie_to_watchlist(
             "Search for the movie first using search_movies."
         )
 
-    # 4. Check whether the movie is already in this watchlist
+    # Prevent duplicate entries
     result = await session.execute(
         select(WatchlistMovie).where(
             WatchlistMovie.watchlist_id == watchlist.id,
@@ -132,41 +127,35 @@ async def add_movie_to_watchlist(
         )
     )
 
-    existing_entry = result.scalar_one_or_none()
-
-    if existing_entry:
+    if result.scalar_one_or_none():
         raise ValueError("Movie already exists in this watchlist.")
 
-    # 5. Create watchlist entry
     watchlist_movie = WatchlistMovie(
         watchlist_id=watchlist.id,
         movie_id=movie.tmdb_id,
     )
 
     session.add(watchlist_movie)
-
     await session.flush()
 
     return watchlist_movie
 
 
-
-
-
-
-
+# 4. Get watchlist details
 async def get_watchlist_details(
     session: AsyncSession,
+    supabase_user_id: str,
     watchlist_id: uuid.UUID,
+    email: str | None = None,
 ) -> Watchlist | None:
-    """
-    Get a watchlist with its complete movie information.
-    """
+    """Get a watchlist only if it belongs to the authenticated user."""
 
-    # 1. Get the current development user
-    user = await get_or_create_dev_user(session)
+    user = await get_or_create_user(
+        session=session,
+        supabase_user_id=supabase_user_id,
+        email=email,
+    )
 
-    # 2. Fetch watchlist, movie entries and related movies
     result = await session.execute(
         select(Watchlist)
         .where(
@@ -183,30 +172,28 @@ async def get_watchlist_details(
     return result.scalar_one_or_none()
 
 
-
-
-
-
-
+# 5. Remove a movie from a watchlist
 async def remove_movie_from_watchlist(
     session: AsyncSession,
+    supabase_user_id: str,
     watchlist_id: uuid.UUID,
     movie_id: str,
+    email: str | None = None,
 ) -> bool:
-    """
-    Remove a movie from a user's watchlist.
-    The movie remains in the movies catalog.
-    """
+    """Remove a movie only from the authenticated user's watchlist."""
 
     movie_id = str(movie_id).strip()
 
     if not movie_id or len(movie_id) > 100:
         raise ValueError("Invalid movie ID.")
 
-    # 1. Get current development user
-    user = await get_or_create_dev_user(session)
+    user = await get_or_create_user(
+        session=session,
+        supabase_user_id=supabase_user_id,
+        email=email,
+    )
 
-    # 2. Verify watchlist ownership
+    # Verify ownership
     result = await session.execute(
         select(Watchlist).where(
             Watchlist.id == watchlist_id,
@@ -219,7 +206,7 @@ async def remove_movie_from_watchlist(
     if not watchlist:
         raise ValueError("Watchlist not found.")
 
-    # 3. Find movie entry in this watchlist
+    # Find the movie entry
     result = await session.execute(
         select(WatchlistMovie).where(
             WatchlistMovie.watchlist_id == watchlist.id,
@@ -232,8 +219,8 @@ async def remove_movie_from_watchlist(
     if not entry:
         raise ValueError("Movie not found in this watchlist.")
 
-    # 4. Delete only the watchlist entry
     await session.delete(entry)
     await session.flush()
 
     return True
+

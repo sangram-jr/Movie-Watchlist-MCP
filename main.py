@@ -1,7 +1,9 @@
 import uuid
 from fastmcp import FastMCP
 from app.database.connection import AsyncSessionLocal,settings
-from sqlalchemy.exc import IntegrityError
+#from sqlalchemy.exc import IntegrityError
+from fastmcp.server.auth.providers.supabase import SupabaseProvider
+from fastmcp.server.dependencies import get_access_token
 from app.services.watchlist_service import (
     create_watchlist as create_watchlist_service,
     get_watchlists as get_watchlists_service,
@@ -17,8 +19,51 @@ from app.services.movie_service import (
     save_movie,
 )
 
+
+# Supabase authentication configuration
+auth = SupabaseProvider(
+    project_url=settings.SUPABASE_URL,
+    base_url="https://movie-watchlist-mcp.onrender.com",
+    algorithm="ES256",
+    resource_name="MovieWatch MCP",
+)
+
+
 # Initialize MCP server
-mcp = FastMCP("MovieWatch MCP")
+mcp = FastMCP(
+    name="MovieWatch MCP",
+    auth=auth,
+)
+
+
+
+def get_authenticated_user():
+    """
+    Extract the verified Supabase user identity
+    from the current MCP request.
+    """
+
+    token = get_access_token()
+
+    if token is None:
+        raise PermissionError("Authentication required.")
+
+    claims = token.claims
+
+    supabase_user_id = claims.get("sub")
+
+    if not supabase_user_id:
+        raise PermissionError(
+            "Supabase user ID missing from access token."
+        )
+
+    email = claims.get("email")
+
+    return {
+        "supabase_user_id": str(supabase_user_id),
+        "email": email,
+    }
+
 
 
 @mcp.tool()
@@ -46,10 +91,14 @@ async def create_watchlist(
         Details of the newly created watchlist.
     """
 
+    identity = get_authenticated_user()
+
     async with AsyncSessionLocal() as session:
         try:
             watchlist = await create_watchlist_service(
                 session=session,
+                supabase_user_id=identity["supabase_user_id"],
+                email=identity["email"],
                 name=name,
                 description=description,
             )
@@ -63,7 +112,7 @@ async def create_watchlist(
                     "id": str(watchlist.id),
                     "name": watchlist.name,
                     "description": watchlist.description,
-                    "user_id": str(watchlist.user_id),
+                    #"user_id": str(watchlist.user_id),
                     "created_at": watchlist.created_at.isoformat()
                     if watchlist.created_at
                     else None,
@@ -96,9 +145,15 @@ async def get_watchlists() -> dict:
         A list of the user's watchlists.
     """
 
+    identity = get_authenticated_user()
+
     async with AsyncSessionLocal() as session:
         try:
-            watchlists = await get_watchlists_service(session)
+            watchlists = await get_watchlists_service(
+                session=session,
+                supabase_user_id=identity["supabase_user_id"],
+                email=identity["email"],
+            )
 
             return {
                 "success": True,
@@ -132,6 +187,8 @@ async def add_movie_to_watchlist(
 ) -> dict:
     """Add a movie to a user's watchlist using its TMDB ID."""
 
+    identity = get_authenticated_user()
+
     try:
         parsed_watchlist_id = uuid.UUID(watchlist_id)
 
@@ -139,8 +196,10 @@ async def add_movie_to_watchlist(
             try:
                 entry = await add_movie_to_watchlist_service(
                     session,
-                    parsed_watchlist_id,
-                    movie_id,
+                    supabase_user_id=identity["supabase_user_id"],
+                    watchlist_id=parsed_watchlist_id,
+                    movie_id=movie_id,
+                    email=identity["email"],
                 )
 
                 await session.commit()
@@ -174,14 +233,18 @@ async def get_watchlist_details(watchlist_id: str) -> dict:
     including all associated movie information.
     """
 
+    identity = get_authenticated_user()
+
     try:
         parsed_watchlist_id = uuid.UUID(watchlist_id)
 
         async with AsyncSessionLocal() as session:
 
             watchlist = await get_watchlist_details_service(
-                session,
-                parsed_watchlist_id,
+                session=session,
+                supabase_user_id=identity["supabase_user_id"],
+                watchlist_id=parsed_watchlist_id,
+                email=identity["email"],
             )
 
             if not watchlist:
@@ -384,15 +447,19 @@ async def remove_movie_from_watchlist(
 ) -> dict:
     """Remove a movie from a watchlist without deleting it from the catalog."""
 
+    identity = get_authenticated_user()
+
     try:
         parsed_watchlist_id = uuid.UUID(watchlist_id)
 
         async with AsyncSessionLocal() as session:
             try:
                 removed = await remove_movie_from_watchlist_service(
-                    session,
-                    parsed_watchlist_id,
-                    movie_id,
+                    session=session,
+                    supabase_user_id=identity["supabase_user_id"],
+                    watchlist_id=parsed_watchlist_id,
+                    movie_id=movie_id,
+                    email=identity["email"],
                 )
 
                 await session.commit()

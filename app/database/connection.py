@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     # They are optional during FastMCP's build-time inspection.
     DATABASE_URL: str | None = None
     TMDB_API_KEY: str | None = None
+    SUPABASE_URL: str
 
-    DEV_USER_EMAIL: str = "developer@example.com"
+    #DEV_USER_EMAIL: str = "developer@example.com"
     TMDB_BASE_URL: str = "https://api.themoviedb.org/3"
     TMDB_IMAGE_BASE_URL: str = "https://image.tmdb.org/t/p/w500"
 
