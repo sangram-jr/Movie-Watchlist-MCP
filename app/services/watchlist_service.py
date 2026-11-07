@@ -8,6 +8,11 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Movie, Watchlist, WatchlistMovie
 from app.services.user_service import get_or_create_user
+from app.services.movie_service import (
+    save_movie,
+    get_movie_by_tmdb_id,
+)
+from app.services.tmdb_service import get_tmdb_movie_details
 
 
 # 1. Create a watchlist
@@ -73,6 +78,73 @@ async def get_watchlists(
 
 
 # 3. Add a movie to a watchlist
+# async def add_movie_to_watchlist(
+#     session: AsyncSession,
+#     supabase_user_id: str,
+#     watchlist_id: uuid.UUID,
+#     movie_id: str,
+#     email: str | None = None,
+# ) -> WatchlistMovie:
+#     """Add an existing movie to the authenticated user's watchlist."""
+
+#     movie_id = str(movie_id).strip()
+
+#     if not movie_id or len(movie_id) > 100:
+#         raise ValueError("Invalid movie ID.")
+
+#     user = await get_or_create_user(
+#         session=session,
+#         supabase_user_id=supabase_user_id,
+#         email=email,
+#     )
+
+#     # Verify ownership
+#     result = await session.execute(
+#         select(Watchlist).where(
+#             Watchlist.id == watchlist_id,
+#             Watchlist.user_id == user.id,
+#         )
+#     )
+
+#     watchlist = result.scalar_one_or_none()
+
+#     if not watchlist:
+#         raise ValueError("Watchlist not found.")
+
+#     # Verify movie exists
+#     result = await session.execute(
+#         select(Movie).where(Movie.tmdb_id == movie_id)
+#     )
+
+#     movie = result.scalar_one_or_none()
+
+#     if not movie:
+#         raise ValueError(
+#             "Movie not found in database. "
+#             "Search for the movie first using search_movies."
+#         )
+
+#     # Prevent duplicate entries
+#     result = await session.execute(
+#         select(WatchlistMovie).where(
+#             WatchlistMovie.watchlist_id == watchlist.id,
+#             WatchlistMovie.movie_id == movie.tmdb_id,
+#         )
+#     )
+
+#     if result.scalar_one_or_none():
+#         raise ValueError("Movie already exists in this watchlist.")
+
+#     watchlist_movie = WatchlistMovie(
+#         watchlist_id=watchlist.id,
+#         movie_id=movie.tmdb_id,
+#     )
+
+#     session.add(watchlist_movie)
+#     await session.flush()
+
+#     return watchlist_movie
+
 async def add_movie_to_watchlist(
     session: AsyncSession,
     supabase_user_id: str,
@@ -80,12 +152,12 @@ async def add_movie_to_watchlist(
     movie_id: str,
     email: str | None = None,
 ) -> WatchlistMovie:
-    """Add an existing movie to the authenticated user's watchlist."""
+    """Fetch and save a selected movie, then add it to the user's watchlist."""
 
     movie_id = str(movie_id).strip()
 
-    if not movie_id or len(movie_id) > 100:
-        raise ValueError("Invalid movie ID.")
+    if not movie_id or not movie_id.isdigit():
+        raise ValueError("Invalid TMDB movie ID.")
 
     user = await get_or_create_user(
         session=session,
@@ -93,7 +165,7 @@ async def add_movie_to_watchlist(
         email=email,
     )
 
-    # Verify ownership
+    # 1. Verify watchlist ownership
     result = await session.execute(
         select(Watchlist).where(
             Watchlist.id == watchlist_id,
@@ -106,20 +178,25 @@ async def add_movie_to_watchlist(
     if not watchlist:
         raise ValueError("Watchlist not found.")
 
-    # Verify movie exists
-    result = await session.execute(
-        select(Movie).where(Movie.tmdb_id == movie_id)
+    # 2. Check whether movie already exists
+    movie = await get_movie_by_tmdb_id(
+        session=session,
+        tmdb_id=movie_id,
     )
 
-    movie = result.scalar_one_or_none()
-
+    # 3. If missing, fetch only the selected movie from TMDB
     if not movie:
-        raise ValueError(
-            "Movie not found in database. "
-            "Search for the movie first using search_movies."
+        movie_data = await get_tmdb_movie_details(movie_id)
+
+        if str(movie_data["tmdb_id"]) != movie_id:
+            raise ValueError("TMDB returned an unexpected movie ID.")
+
+        movie = await save_movie(
+            session=session,
+            movie_data=movie_data,
         )
 
-    # Prevent duplicate entries
+    # 4. Prevent duplicate watchlist entries
     result = await session.execute(
         select(WatchlistMovie).where(
             WatchlistMovie.watchlist_id == watchlist.id,
@@ -130,6 +207,7 @@ async def add_movie_to_watchlist(
     if result.scalar_one_or_none():
         raise ValueError("Movie already exists in this watchlist.")
 
+    # 5. Create the relationship
     watchlist_movie = WatchlistMovie(
         watchlist_id=watchlist.id,
         movie_id=movie.tmdb_id,
@@ -139,6 +217,9 @@ async def add_movie_to_watchlist(
     await session.flush()
 
     return watchlist_movie
+
+
+
 
 
 # 4. Get watchlist details

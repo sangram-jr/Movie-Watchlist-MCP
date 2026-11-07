@@ -1,4 +1,6 @@
 import uuid
+import logging
+logger = logging.getLogger(__name__)
 from fastmcp import FastMCP
 from app.database.connection import AsyncSessionLocal,settings
 #from sqlalchemy.exc import IntegrityError
@@ -318,65 +320,93 @@ async def get_watchlist_details(watchlist_id: str) -> dict:
 
 
 
+# @mcp.tool()
+# async def search_movies(query: str, page: int = 1) -> dict:
+    # """
+    # Search movies using TMDB and save the results in our database.
+    # """
+
+    # try:
+    #     # 1. Search movies from TMDB
+    #     movies = await search_tmdb_movies(query, page)
+
+    #     if not movies:
+    #         return {
+    #             "success": True,
+    #             "message": "No movies found.",
+    #             "movies": [],
+    #         }
+
+    #     saved_movies = []
+
+    #     # 2. Save each movie in PostgreSQL
+    #     async with AsyncSessionLocal() as session:
+    #         try:
+    #             for movie_data in movies:
+    #                 movie = await save_movie(session, movie_data)
+
+    #                 saved_movies.append({
+    #                     "id": str(movie.id),
+    #                     "tmdb_id": movie.tmdb_id,
+    #                     "title": movie.title,
+    #                     "release_date": (
+    #                         movie.release_date.isoformat()
+    #                         if movie.release_date else None
+    #                     ),
+    #                     "vote_average": movie.vote_average,
+    #                     "poster_path": movie.poster_path,
+    #                     "poster_url": (
+    #                         f"{settings.TMDB_IMAGE_BASE_URL}{movie.poster_path}"
+    #                         if movie.poster_path else None
+    #                     ),
+    #                 })
+
+    #             await session.commit()
+
+    #         except Exception:
+    #             await session.rollback()
+    #             raise
+
+    #     # 3. Return results to the AI client
+    #     return {
+    #         "success": True,
+    #         "total_results": len(saved_movies),
+    #         "movies": saved_movies,
+    #     }
+
+    # except Exception as error:
+    #     return {
+    #         "success": False,
+    #         "error": str(error),
+    #     }
+
 @mcp.tool()
 async def search_movies(query: str, page: int = 1) -> dict:
     """
-    Search movies using TMDB and save the results in our database.
+    Search movies using TMDB.
+
+    Search results are not stored in PostgreSQL.
+    Movies are saved only when explicitly added to a watchlist.
     """
 
     try:
-        # 1. Search movies from TMDB
         movies = await search_tmdb_movies(query, page)
 
-        if not movies:
-            return {
-                "success": True,
-                "message": "No movies found.",
-                "movies": [],
-            }
-
-        saved_movies = []
-
-        # 2. Save each movie in PostgreSQL
-        async with AsyncSessionLocal() as session:
-            try:
-                for movie_data in movies:
-                    movie = await save_movie(session, movie_data)
-
-                    saved_movies.append({
-                        "id": str(movie.id),
-                        "tmdb_id": movie.tmdb_id,
-                        "title": movie.title,
-                        "release_date": (
-                            movie.release_date.isoformat()
-                            if movie.release_date else None
-                        ),
-                        "vote_average": movie.vote_average,
-                        "poster_path": movie.poster_path,
-                        "poster_url": (
-                            f"{settings.TMDB_IMAGE_BASE_URL}{movie.poster_path}"
-                            if movie.poster_path else None
-                        ),
-                    })
-
-                await session.commit()
-
-            except Exception:
-                await session.rollback()
-                raise
-
-        # 3. Return results to the AI client
         return {
             "success": True,
-            "total_results": len(saved_movies),
-            "movies": saved_movies,
+            "total_results": len(movies),
+            "movies": movies,
+            "message": "Select a movie to add it to your watchlist.",
         }
 
-    except Exception as error:
+    except Exception:
+        logger.exception("Movie search failed")
         return {
             "success": False,
-            "error": str(error),
+            "error": "Unable to search movies.",
         }
+    
+    
 
 
 
