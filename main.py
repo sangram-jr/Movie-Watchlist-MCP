@@ -25,6 +25,7 @@ auth = SupabaseProvider(
     project_url=settings.SUPABASE_URL,
     base_url="https://movie-watchlist-mcp.onrender.com",
     algorithm="ES256",
+    scopes_supported=["openid", "profile", "email"],
     resource_name="MovieWatch MCP",
 )
 
